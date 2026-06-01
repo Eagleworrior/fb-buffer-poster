@@ -87,7 +87,6 @@ def distribute_to_buffer():
             
             res_data = res.json()
             
-            # Safe parsing to prevent 'NoneType' crashes if Buffer returns an error structure
             errors = res_data.get("errors")
             data_content = res_data.get("data") or {}
             
@@ -102,7 +101,6 @@ def distribute_to_buffer():
                 scheduled_info = create_post_result["post"]
                 print(f"[+] Post [{index}] successfully queued for timeline: {scheduled_info.get('dueAt')}")
             else:
-                # This will catch and print the exact raw response if things go sideways
                 print(f"[-] Unexpected response format on item {index}: {res_data}")
 
         except Exception as conn_err:
