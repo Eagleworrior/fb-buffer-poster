@@ -62,11 +62,16 @@ def distribute_to_buffer():
 
         input_variables = {
             "channelId": BUFFER_CHANNEL_ID,
-            "type": "post", # <--- THIS IS THE FIX 
             "text": post_text,
             "schedulingType": "automatic",
             "mode": "customScheduled",
-            "dueAt": due_at_timestamp
+            "dueAt": due_at_timestamp,
+            # THIS IS THE CORRECT BUFFER FORMAT FOR FACEBOOK TYPES
+            "postDetails": {
+                "facebook": {
+                    "postType": "post"
+                }
+            }
         }
 
         if picture_url and picture_url.startswith("http"):
@@ -84,7 +89,11 @@ def distribute_to_buffer():
         try:
             payload = {"query": query, "variables": {"input": input_variables}}
             res = requests.post("https://api.buffer.com", headers=headers, json=payload)
-            res.raise_for_status()
+            
+            # Crash prevention: Safely catch non-200 HTTP responses and print them natively
+            if res.status_code != 200:
+                print(f"[-] Buffer rejected request (HTTP {res.status_code}) on item {index}: {res.text}")
+                continue
             
             res_data = res.json()
             
