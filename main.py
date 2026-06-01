@@ -62,6 +62,7 @@ def distribute_to_buffer():
 
         input_variables = {
             "channelId": BUFFER_CHANNEL_ID,
+            "type": "post", # <--- THIS IS THE FIX 
             "text": post_text,
             "schedulingType": "automatic",
             "mode": "customScheduled",
