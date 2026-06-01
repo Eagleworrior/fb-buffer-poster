@@ -2,72 +2,99 @@ import os
 import sys
 import datetime
 import requests
-import time
+import json
 
+# Load secrets from GitHub Actions environment
 BUFFER_API_KEY = os.getenv("BUFFER_API_KEY")
 BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 if not all([BUFFER_API_KEY, BUFFER_CHANNEL_ID, NEWS_API_KEY]):
-    print("[-] Operational Error: Missing required repository secrets.")
+    print("[-] Error: Missing required repository secrets.")
     sys.exit(1)
 
 def fetch_daily_content():
-    """Retrieve exactly 10 distinct stories."""
+    """Fetch 10 articles."""
     url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=10&apiKey={NEWS_API_KEY}"
     try:
         response = requests.get(url)
         response.raise_for_status()
         return response.json().get("articles", [])
     except Exception as e:
-        print(f"[-] Data Retrieval Error: {e}")
+        print(f"[-] News Fetch Error: {e}")
         return []
 
-def distribute_to_buffer():
+def send_to_buffer():
     articles = fetch_daily_content()
     if not articles:
-        print("[-] Aborting run: No functional source articles found.")
+        print("[-] No content found.")
         return
 
-    print(f"[+] Loaded {len(articles)} items. Sending to Buffer via REST API...")
+    # Buffer GraphQL Endpoint (Must be api.buffer.com)
+    url = "https://api.buffer.com"
     
-    # Calculate timestamps (Buffer API expects UNIX epoch timestamps)
-    # Start 2 hours from now
+    headers = {
+        "Authorization": f"Bearer {BUFFER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    mutation = """
+    mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess {
+          post {
+            id
+            dueAt
+          }
+        }
+        ... on MutationError {
+          message
+        }
+      }
+    }
+    """
+
     start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
 
     for index, article in enumerate(articles):
-        headline = article.get("title", "Breaking News Update")
-        source_link = article.get("url", "")
-        post_text = f"{headline}\n\nRead more: {source_link}"
+        headline = article.get("title", "Breaking News")
+        link = article.get("url", "")
+        post_text = f"{headline}\n\nRead more: {link}"
         
         # Calculate time: 2 hours difference per post
         scheduled_time = start_time + datetime.timedelta(hours=index * 2)
-        unix_timestamp = int(scheduled_time.timestamp())
+        due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
-        # Buffer v1 REST API endpoint
-        url = "https://api.bufferapp.com/1/updates/create.json"
-        
-        headers = {"Authorization": f"Bearer {BUFFER_API_KEY}"}
-        
-        data = {
-            "profile_ids[]": BUFFER_CHANNEL_ID,
-            "text": post_text,
-            "scheduled_at": unix_timestamp
+        # The clean input payload for GraphQL
+        variables = {
+            "input": {
+                "channelId": BUFFER_CHANNEL_ID,
+                "text": post_text,
+                "schedulingType": "automatic",
+                "mode": "customScheduled",
+                "dueAt": due_at
+            }
         }
 
         try:
-            res = requests.post(url, headers=headers, data=data)
+            payload = {"query": mutation, "variables": variables}
+            response = requests.post(url, headers=headers, json=payload)
+            response.raise_for_status()
             
-            if res.status_code == 200:
-                print(f"[+] Post [{index}] successfully queued for: {scheduled_time}")
+            result = response.json()
+            
+            # Check for GraphQL errors
+            if "errors" in result:
+                print(f"[-] Post {index} GraphQL Error: {result['errors']}")
             else:
-                print(f"[-] Buffer rejected post [{index}] (HTTP {res.status_code}): {res.text}")
-                
-            # Brief pause to stay within API rate limits
-            time.sleep(1)
-            
+                data = result.get("data", {}).get("createPost", {})
+                if "message" in data:
+                    print(f"[-] Post {index} Buffer Error: {data['message']}")
+                else:
+                    print(f"[+] Post {index} successfully queued for {due_at}")
+                    
         except Exception as e:
-            print(f"[-] Connection failure on post [{index}]: {e}")
+            print(f"[-] Connection Error on post {index}: {e}")
 
 if __name__ == "__main__":
-    distribute_to_buffer()
+    send_to_buffer()
