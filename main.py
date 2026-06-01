@@ -55,29 +55,32 @@ def send_to_buffer():
     for index, article in enumerate(articles):
         headline = article.get("title", "Breaking News")
         link = article.get("url", "")
+        image_url = article.get("urlToImage") # Extract the image
         post_text = f"{headline}\n\nRead more: {link}"
         
         scheduled_time = start_time + datetime.timedelta(hours=index * 2)
         due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
-        # The 'metadata' field is where we define the Facebook post type
-        variables = {
-            "input": {
-                "channelId": BUFFER_CHANNEL_ID,
-                "text": post_text,
-                "schedulingType": "automatic",
-                "mode": "customScheduled",
-                "dueAt": due_at,
-                "metadata": {
-                    "facebook": {
-                        "type": "post"
-                    }
+        # Define the payload
+        input_data = {
+            "channelId": BUFFER_CHANNEL_ID,
+            "text": post_text,
+            "schedulingType": "automatic",
+            "mode": "customScheduled",
+            "dueAt": due_at,
+            "metadata": {
+                "facebook": {
+                    "type": "post"
                 }
             }
         }
 
+        # Only add assets if an image URL exists
+        if image_url:
+            input_data["assets"] = [{"image": {"url": image_url}}]
+
         try:
-            payload = {"query": mutation, "variables": variables}
+            payload = {"query": mutation, "variables": {"input": input_data}}
             response = requests.post(url, headers=headers, json=payload)
             response.raise_for_status()
             
@@ -90,7 +93,7 @@ def send_to_buffer():
                 if "message" in data:
                     print(f"[-] Post {index} Buffer Error: {data['message']}")
                 else:
-                    print(f"[+] Post {index} successfully queued for {due_at}")
+                    print(f"[+] Post {index} successfully queued with image")
                     
         except Exception as e:
             print(f"[-] Connection Error on post {index}: {e}")
