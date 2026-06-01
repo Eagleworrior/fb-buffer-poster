@@ -2,7 +2,6 @@ import os
 import sys
 import datetime
 import requests
-import json
 
 # Load secrets from GitHub Actions environment
 BUFFER_API_KEY = os.getenv("BUFFER_API_KEY")
@@ -14,7 +13,6 @@ if not all([BUFFER_API_KEY, BUFFER_CHANNEL_ID, NEWS_API_KEY]):
     sys.exit(1)
 
 def fetch_daily_content():
-    """Fetch 10 articles."""
     url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=10&apiKey={NEWS_API_KEY}"
     try:
         response = requests.get(url)
@@ -30,9 +28,7 @@ def send_to_buffer():
         print("[-] No content found.")
         return
 
-    # Buffer GraphQL Endpoint (Must be api.buffer.com)
     url = "https://api.buffer.com"
-    
     headers = {
         "Authorization": f"Bearer {BUFFER_API_KEY}",
         "Content-Type": "application/json"
@@ -61,18 +57,22 @@ def send_to_buffer():
         link = article.get("url", "")
         post_text = f"{headline}\n\nRead more: {link}"
         
-        # Calculate time: 2 hours difference per post
         scheduled_time = start_time + datetime.timedelta(hours=index * 2)
         due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
-        # The clean input payload for GraphQL
+        # The 'metadata' field is where we define the Facebook post type
         variables = {
             "input": {
                 "channelId": BUFFER_CHANNEL_ID,
                 "text": post_text,
                 "schedulingType": "automatic",
                 "mode": "customScheduled",
-                "dueAt": due_at
+                "dueAt": due_at,
+                "metadata": {
+                    "facebook": {
+                        "type": "post"
+                    }
+                }
             }
         }
 
@@ -83,7 +83,6 @@ def send_to_buffer():
             
             result = response.json()
             
-            # Check for GraphQL errors
             if "errors" in result:
                 print(f"[-] Post {index} GraphQL Error: {result['errors']}")
             else:
