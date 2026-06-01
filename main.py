@@ -68,7 +68,6 @@ def distribute_to_buffer():
             "dueAt": due_at_timestamp
         }
 
-        # Format image objects natively according to Buffer's explicit asset parameters
         if picture_url and picture_url.startswith("http"):
             input_variables["assets"] = [{
                 "image": {
@@ -87,16 +86,24 @@ def distribute_to_buffer():
             res.raise_for_status()
             
             res_data = res.json()
+            
+            # Safe parsing to prevent 'NoneType' crashes if Buffer returns an error structure
             errors = res_data.get("errors")
-            mutation_error = res_data.get("data", {}).get("createPost", {}).get("message")
+            data_content = res_data.get("data") or {}
+            
+            create_post_result = data_content.get("createPost") if isinstance(data_content, dict) else None
+            mutation_error = create_post_result.get("message") if isinstance(create_post_result, dict) else None
 
             if errors:
-                print(f"[-] API Syntax Error on item {index}: {errors}")
+                print(f"[-] Buffer API Error on item {index}: {errors}")
             elif mutation_error:
                 print(f"[-] Buffer Queue Rejection on item {index}: {mutation_error}")
+            elif create_post_result and "post" in create_post_result:
+                scheduled_info = create_post_result["post"]
+                print(f"[+] Post [{index}] successfully queued for timeline: {scheduled_info.get('dueAt')}")
             else:
-                scheduled_info = res_data["data"]["createPost"]["post"]
-                print(f"[+] Post [{index}] successfully queued for timeline: {scheduled_info['dueAt']}")
+                # This will catch and print the exact raw response if things go sideways
+                print(f"[-] Unexpected response format on item {index}: {res_data}")
 
         except Exception as conn_err:
             print(f"[-] Critical connection dropout on item {index}: {conn_err}")
