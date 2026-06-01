@@ -2,6 +2,7 @@ import os
 import sys
 import datetime
 import requests
+import time
 
 BUFFER_API_KEY = os.getenv("BUFFER_API_KEY")
 BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
@@ -12,7 +13,7 @@ if not all([BUFFER_API_KEY, BUFFER_CHANNEL_ID, NEWS_API_KEY]):
     sys.exit(1)
 
 def fetch_daily_content():
-    """Retrieve exactly 10 distinct stories containing text and imagery."""
+    """Retrieve exactly 10 distinct stories."""
     url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=10&apiKey={NEWS_API_KEY}"
     try:
         response = requests.get(url)
@@ -28,80 +29,45 @@ def distribute_to_buffer():
         print("[-] Aborting run: No functional source articles found.")
         return
 
-    print(f"[+] Loaded {len(articles)} items. Preparing sequential timeline injection...")
+    print(f"[+] Loaded {len(articles)} items. Sending to Buffer via REST API...")
     
-    # Establish baseline schedule starting point (2 hours from execution time)
-    base_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
+    # Calculate timestamps (Buffer API expects UNIX epoch timestamps)
+    # Start 2 hours from now
+    start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
 
     for index, article in enumerate(articles):
         headline = article.get("title", "Breaking News Update")
         source_link = article.get("url", "")
-        
         post_text = f"{headline}\n\nRead more: {source_link}"
         
-        # Calculate dynamic 2-hour interval spacing per array item loop
-        target_time = base_time + datetime.timedelta(hours=index * 2)
-        due_at_timestamp = target_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        # Calculate time: 2 hours difference per post
+        scheduled_time = start_time + datetime.timedelta(hours=index * 2)
+        unix_timestamp = int(scheduled_time.timestamp())
 
-        query = """
-        mutation CreatePost($input: CreatePostInput!) {
-          createPost(input: $input) {
-            ... on PostActionSuccess {
-              post {
-                id
-                dueAt
-              }
-            }
-            ... on MutationError {
-              message
-            }
-          }
-        }
-        """
-
-        # We removed the manual image upload assets. Facebook will now auto-generate 
-        # a link preview with the image, naturally forcing it into a standard timeline post.
-        input_variables = {
-            "channelId": BUFFER_CHANNEL_ID,
+        # Buffer v1 REST API endpoint
+        url = "https://api.bufferapp.com/1/updates/create.json"
+        
+        headers = {"Authorization": f"Bearer {BUFFER_API_KEY}"}
+        
+        data = {
+            "profile_ids[]": BUFFER_CHANNEL_ID,
             "text": post_text,
-            "schedulingType": "automatic",
-            "mode": "customScheduled",
-            "dueAt": due_at_timestamp
-        }
-
-        headers = {
-            "Authorization": f"Bearer {BUFFER_API_KEY}",
-            "Content-Type": "application/json"
+            "scheduled_at": unix_timestamp
         }
 
         try:
-            payload = {"query": query, "variables": {"input": input_variables}}
-            res = requests.post("https://api.buffer.com", headers=headers, json=payload)
+            res = requests.post(url, headers=headers, data=data)
             
-            if res.status_code != 200:
-                print(f"[-] Buffer rejected request (HTTP {res.status_code}) on item {index}: {res.text}")
-                continue
-            
-            res_data = res.json()
-            
-            errors = res_data.get("errors")
-            data_content = res_data.get("data") or {}
-            
-            create_post_result = data_content.get("createPost") if isinstance(data_content, dict) else None
-            mutation_error = create_post_result.get("message") if isinstance(create_post_result, dict) else None
-
-            if errors:
-                print(f"[-] Buffer API Error on item {index}: {errors}")
-            elif mutation_error:
-                print(f"[-] Buffer Queue Rejection on item {index}: {mutation_error}")
-            elif create_post_result and "post" in create_post_result:
-                scheduled_info = create_post_result["post"]
-                print(f"[+] Post [{index}] successfully queued for timeline: {scheduled_info.get('dueAt')}")
+            if res.status_code == 200:
+                print(f"[+] Post [{index}] successfully queued for: {scheduled_time}")
             else:
-                print(f"[-] Unexpected response format on item {index}: {res_data}")
-
-        except Exception as conn_err:
-            print(f"[-] Critical connection dropout on item {index}: {conn_err}")
+                print(f"[-] Buffer rejected post [{index}] (HTTP {res.status_code}): {res.text}")
+                
+            # Brief pause to stay within API rate limits
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"[-] Connection failure on post [{index}]: {e}")
 
 if __name__ == "__main__":
     distribute_to_buffer()
