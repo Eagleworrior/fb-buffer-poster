@@ -3,17 +3,24 @@ import sys
 import datetime
 import requests
 
-# Load secrets from GitHub Actions environment
+# Load secrets
 BUFFER_API_KEY = os.getenv("BUFFER_API_KEY")
 BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+HISTORY_FILE = "posted_headlines.txt"
 
-if not all([BUFFER_API_KEY, BUFFER_CHANNEL_ID, NEWS_API_KEY]):
-    print("[-] Error: Missing required repository secrets.")
-    sys.exit(1)
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            return set(line.strip() for line in f)
+    return set()
+
+def save_history(headline):
+    with open(HISTORY_FILE, "a") as f:
+        f.write(f"{headline}\n")
 
 def fetch_daily_content():
-    url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=10&apiKey={NEWS_API_KEY}"
+    url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=5&apiKey={NEWS_API_KEY}"
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -24,6 +31,8 @@ def fetch_daily_content():
 
 def send_to_buffer():
     articles = fetch_daily_content()
+    posted_already = load_history()
+    
     if not articles:
         print("[-] No content found.")
         return
@@ -37,15 +46,8 @@ def send_to_buffer():
     mutation = """
     mutation CreatePost($input: CreatePostInput!) {
       createPost(input: $input) {
-        ... on PostActionSuccess {
-          post {
-            id
-            dueAt
-          }
-        }
-        ... on MutationError {
-          message
-        }
+        ... on PostActionSuccess { post { id } }
+        ... on MutationError { message }
       }
     }
     """
@@ -54,30 +56,39 @@ def send_to_buffer():
 
     for index, article in enumerate(articles):
         headline = article.get("title", "Breaking News")
-        link = article.get("url", "")
-        image_url = article.get("urlToImage") # Extract the image
-        post_text = f"{headline}\n\nRead more: {link}"
+        description = article.get("description", "")
+        
+        # Skip if we already posted this headline
+        if headline in posted_already:
+            continue
+
+        # Post text is now the full description without links
+        post_text = f"{headline}\n\n{description}"
         
         scheduled_time = start_time + datetime.timedelta(hours=index * 2)
         due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
-        # Define the payload
         input_data = {
             "channelId": BUFFER_CHANNEL_ID,
             "text": post_text,
             "schedulingType": "automatic",
             "mode": "customScheduled",
             "dueAt": due_at,
-            "metadata": {
-                "facebook": {
-                    "type": "post"
-                }
-            }
+            "metadata": {"facebook": {"type": "post"}}
         }
 
-        # Only add assets if an image URL exists
-        if image_url:
-            input_data["assets"] = [{"image": {"url": image_url}}]
+        # Logic for Images AND Videos
+        image_url = article.get("urlToImage")
+        video_url = article.get("videoUrl") # Hypothetical field if your news source has video
+
+        assets = []
+        if video_url:
+            assets.append({"video": {"url": video_url}})
+        elif image_url:
+            assets.append({"image": {"url": image_url}})
+        
+        if assets:
+            input_data["assets"] = assets
 
         try:
             payload = {"query": mutation, "variables": {"input": input_data}}
@@ -85,18 +96,13 @@ def send_to_buffer():
             response.raise_for_status()
             
             result = response.json()
-            
-            if "errors" in result:
-                print(f"[-] Post {index} GraphQL Error: {result['errors']}")
+            if "errors" not in result and "message" not in result.get("data", {}).get("createPost", {}):
+                print(f"[+] Post [{index}] successfully queued.")
+                save_history(headline)
             else:
-                data = result.get("data", {}).get("createPost", {})
-                if "message" in data:
-                    print(f"[-] Post {index} Buffer Error: {data['message']}")
-                else:
-                    print(f"[+] Post {index} successfully queued with image")
-                    
+                print(f"[-] Buffer Error on post {index}")
         except Exception as e:
-            print(f"[-] Connection Error on post {index}: {e}")
+            print(f"[-] Connection Error: {e}")
 
 if __name__ == "__main__":
     send_to_buffer()
