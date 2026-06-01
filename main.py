@@ -36,7 +36,6 @@ def distribute_to_buffer():
     for index, article in enumerate(articles):
         headline = article.get("title", "Breaking News Update")
         source_link = article.get("url", "")
-        picture_url = article.get("urlToImage")
         
         post_text = f"{headline}\n\nRead more: {source_link}"
         
@@ -60,26 +59,15 @@ def distribute_to_buffer():
         }
         """
 
+        # We removed the manual image upload assets. Facebook will now auto-generate 
+        # a link preview with the image, naturally forcing it into a standard timeline post.
         input_variables = {
             "channelId": BUFFER_CHANNEL_ID,
             "text": post_text,
             "schedulingType": "automatic",
             "mode": "customScheduled",
-            "dueAt": due_at_timestamp,
-            # THIS IS THE CORRECT BUFFER FORMAT FOR FACEBOOK TYPES
-            "postDetails": {
-                "facebook": {
-                    "postType": "post"
-                }
-            }
+            "dueAt": due_at_timestamp
         }
-
-        if picture_url and picture_url.startswith("http"):
-            input_variables["assets"] = [{
-                "image": {
-                    "url": picture_url
-                }
-            }]
 
         headers = {
             "Authorization": f"Bearer {BUFFER_API_KEY}",
@@ -90,7 +78,6 @@ def distribute_to_buffer():
             payload = {"query": query, "variables": {"input": input_variables}}
             res = requests.post("https://api.buffer.com", headers=headers, json=payload)
             
-            # Crash prevention: Safely catch non-200 HTTP responses and print them natively
             if res.status_code != 200:
                 print(f"[-] Buffer rejected request (HTTP {res.status_code}) on item {index}: {res.text}")
                 continue
