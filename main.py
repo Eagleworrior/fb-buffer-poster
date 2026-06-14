@@ -12,6 +12,7 @@ BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 if not all([BUFFER_API_KEY, BUFFER_CHANNEL_ID, NEWS_API_KEY]):
+    print("[-] Missing required environment variables.")
     sys.exit(1)
 
 # Configure Session
@@ -38,14 +39,16 @@ def send_to_buffer():
     }
     """
 
-    start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
+    # First post schedules exactly 1 hour after the script runs
+    start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
 
     for index, article in enumerate(articles):
         title = article.get("title", "Breaking News")
         snippet = article.get("content") or article.get("description") or ""
         post_text = f"{title}\n\n{snippet}\n\nRead more: https://appsupdatess.blogspot.com"
         
-        scheduled_time = start_time + datetime.timedelta(hours=index * 2)
+        # Subsequent posts schedule in 1-hour increments
+        scheduled_time = start_time + datetime.timedelta(hours=index)
         due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
         input_data = {
@@ -66,7 +69,7 @@ def send_to_buffer():
         response = session.post("https://api.buffer.com", headers=headers, json=payload)
         
         if response.status_code == 200:
-            print(f"[+] Post {index} queued.")
+            print(f"[+] Post {index} queued for {due_at}.")
         else:
             print(f"[-] Error on post {index}: {response.text}")
         
