@@ -55,13 +55,27 @@ def send_to_buffer():
         snippet = article.get("content") or article.get("description") or ""
         
         # 1. CONTENT FILTER CHECK
-        # Combine everything into a lowercase string to check against our blocklist
         full_text_check = f"{title} {snippet}".lower()
         if any(word in full_text_check for word in META_TRIGGER_WORDS):
             print(f"[⏩] Skipping article to protect Page Quality: {title}")
             continue  # Skips this loop entirely and moves to the next article
 
-        post_text = f"{title}\n\n{snippet}\n\nRead more: https://appsupdatess.blogspot.com"
+        # 2. CLEAN & TRUNCATE TEXT TO STOP ON THE LAST COMMA
+        # Strip out the News API "[+XXXX chars]" truncated footer if it exists
+        if "[+" in snippet:
+            snippet = snippet.split("[+")[0].strip()
+        
+        # Strip trailing text ellipses to locate real punctuation commas
+        if snippet.endswith("..."):
+            snippet = snippet[:-3].strip()
+            
+        # Strictly stop right at the last comma if one is found
+        if "," in snippet:
+            snippet = snippet.rsplit(",", 1)[0].strip() + ","
+
+        # 3. APPEND THE EXACT TARGET HASHTAG STRING
+        hashtags = "K #follower#follower#fypシ゚viralシ#operationallessons#dashcamfootage#PoliceProcedures#foryoupageシ#FBI#dashcam#fbi#Georgia"
+        post_text = f"{title}\n\n{snippet}\n\n{hashtags}"
         
         # Subsequent safe posts schedule in clean 1-hour increments using posted_count
         scheduled_time = start_time + datetime.timedelta(hours=posted_count)
@@ -76,8 +90,15 @@ def send_to_buffer():
             "metadata": {"facebook": {"type": "post"}}
         }
 
-        if article.get("urlToImage"):
-            input_data["assets"] = [{"image": {"url": article.get("urlToImage")}}]
+        # 4. DYNAMIC MEDIA HANDLING (IMAGE OR VIDEO ASSETS)
+        assets = []
+        if article.get("urlToVideo"):  # Built-in check if you scale or feed raw video links
+            assets.append({"video": {"url": article.get("urlToVideo")}})
+        elif article.get("urlToImage"):
+            assets.append({"image": {"url": article.get("urlToImage")}})
+
+        if assets:
+            input_data["assets"] = assets
 
         payload = {"query": mutation, "variables": {"input": input_data}}
         headers = {"Authorization": f"Bearer {BUFFER_API_KEY}", "Content-Type": "application/json"}
@@ -90,7 +111,7 @@ def send_to_buffer():
         else:
             print(f"[-] Error on post {index}: {response.text}")
         
-        # Stagger to prevent rate limit (60s delay) - only applies if we actually hit Buffer
+        # Stagger to prevent rate limit (60s delay)
         if index < len(articles) - 1:
             time.sleep(60)
 
