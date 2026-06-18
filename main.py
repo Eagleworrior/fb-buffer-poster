@@ -40,13 +40,10 @@ def send_to_buffer():
     }
     """
 
-    # First post schedules exactly 1 hour after the script runs
     start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
 
-    # 1. CRITICAL SKIP LIST: Too dangerous to mask. If found, drop the article completely.
     CRITICAL_SKIP_WORDS = ["suicide", "self-harm", "autopsy"]
 
-    # 2. SANITIZATION DICTIONARY: Automatically swaps unsafe words for safe ones
     REPLACEMENT_MAP = {
         "death": "passing",
         "died": "passed away",
@@ -60,40 +57,34 @@ def send_to_buffer():
         "corpse": "remains"
     }
 
-    posted_count = 0  # Tracks successfully processed articles to keep schedule clean
+    posted_count = 0  
 
     for index, article in enumerate(articles):
         title = article.get("title", "Breaking News")
         snippet = article.get("content") or article.get("description") or ""
         
-        # Check for critical skip words first
         full_text_check = f"{title} {snippet}".lower()
         if any(word in full_text_check for word in CRITICAL_SKIP_WORDS):
             print(f"[⏩] Hard-skipping critical article to protect page standing: {title}")
             continue
 
-        # 3. DYNAMIC TEXT REWRITE ENGINE
-        # Loop through dictionary and use case-insensitive word-boundary replacement
         for unsafe_word, safe_word in REPLACEMENT_MAP.items():
             pattern = re.compile(r'\b' + re.escape(unsafe_word) + r'\b', re.IGNORECASE)
             title = pattern.sub(safe_word, title)
             snippet = pattern.sub(safe_word, snippet)
 
-        # Clean & truncate text to stop on the last comma
+        # TEXT MAXIMIZER: Get every character News API allows without chopping early commas
         if "[+" in snippet:
+            # Splits right at the limit tracker
             snippet = snippet.split("[+")[0].strip()
         
         if snippet.endswith("..."):
             snippet = snippet[:-3].strip()
-            
-        if "," in snippet:
-            snippet = snippet.rsplit(",", 1)[0].strip() + ","
 
         # Append exact target hashtag string
         hashtags = "K #follower#follower#fypシ゚viralシ#operationallessons#dashcamfootage#PoliceProcedures#foryoupageシ#FBI#dashcam#fbi#Georgia"
-        post_text = f"{title}\n\n{snippet}\n\n{hashtags}"
+        post_text = f"{title}\n\n{snippet}...\n\n{hashtags}"
         
-        # Subsequent safe posts schedule in clean 1-hour increments using posted_count
         scheduled_time = start_time + datetime.timedelta(hours=posted_count)
         due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
@@ -106,7 +97,6 @@ def send_to_buffer():
             "metadata": {"facebook": {"type": "post"}}
         }
 
-        # Dynamic media handling
         assets = []
         if article.get("urlToVideo"):
             assets.append({"video": {"url": article.get("urlToVideo")}})
@@ -123,11 +113,10 @@ def send_to_buffer():
         
         if response.status_code == 200:
             print(f"[+] Post {index} sanitized and queued for {due_at}.")
-            posted_count += 1  # Increment only on successful queue addition
+            posted_count += 1
         else:
             print(f"[-] Error on post {index}: {response.text}")
         
-        # Stagger to prevent rate limit (60s delay)
         if index < len(articles) - 1:
             time.sleep(60)
 
