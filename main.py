@@ -3,6 +3,7 @@ import sys
 import datetime
 import requests
 import time
+import re
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -42,11 +43,22 @@ def send_to_buffer():
     # First post schedules exactly 1 hour after the script runs
     start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
 
-    # List of sensitive trigger words that cause Meta's API to flag your content
-    META_TRIGGER_WORDS = [
-        "suicide", "died", "death", "killed", "murder", "fatal", 
-        "shooting", "corpse", "stabbing", "homicide", "autopsy"
-    ]
+    # 1. CRITICAL SKIP LIST: Too dangerous to mask. If found, drop the article completely.
+    CRITICAL_SKIP_WORDS = ["suicide", "self-harm", "autopsy"]
+
+    # 2. SANITIZATION DICTIONARY: Automatically swaps unsafe words for safe ones
+    REPLACEMENT_MAP = {
+        "death": "passing",
+        "died": "passed away",
+        "killed": "lost",
+        "murder": "tragic incident",
+        "murdered": "fatally harmed",
+        "fatal": "serious",
+        "shooting": "critical incident",
+        "stabbing": "altercation",
+        "homicide": "investigation",
+        "corpse": "remains"
+    }
 
     posted_count = 0  # Tracks successfully processed articles to keep schedule clean
 
@@ -54,26 +66,30 @@ def send_to_buffer():
         title = article.get("title", "Breaking News")
         snippet = article.get("content") or article.get("description") or ""
         
-        # 1. CONTENT FILTER CHECK
+        # Check for critical skip words first
         full_text_check = f"{title} {snippet}".lower()
-        if any(word in full_text_check for word in META_TRIGGER_WORDS):
-            print(f"[⏩] Skipping article to protect Page Quality: {title}")
-            continue  # Skips this loop entirely and moves to the next article
+        if any(word in full_text_check for word in CRITICAL_SKIP_WORDS):
+            print(f"[⏩] Hard-skipping critical article to protect page standing: {title}")
+            continue
 
-        # 2. CLEAN & TRUNCATE TEXT TO STOP ON THE LAST COMMA
-        # Strip out the News API "[+XXXX chars]" truncated footer if it exists
+        # 3. DYNAMIC TEXT REWRITE ENGINE
+        # Loop through dictionary and use case-insensitive word-boundary replacement
+        for unsafe_word, safe_word in REPLACEMENT_MAP.items():
+            pattern = re.compile(r'\b' + re.escape(unsafe_word) + r'\b', re.IGNORECASE)
+            title = pattern.sub(safe_word, title)
+            snippet = pattern.sub(safe_word, snippet)
+
+        # Clean & truncate text to stop on the last comma
         if "[+" in snippet:
             snippet = snippet.split("[+")[0].strip()
         
-        # Strip trailing text ellipses to locate real punctuation commas
         if snippet.endswith("..."):
             snippet = snippet[:-3].strip()
             
-        # Strictly stop right at the last comma if one is found
         if "," in snippet:
             snippet = snippet.rsplit(",", 1)[0].strip() + ","
 
-        # 3. APPEND THE EXACT TARGET HASHTAG STRING
+        # Append exact target hashtag string
         hashtags = "K #follower#follower#fypシ゚viralシ#operationallessons#dashcamfootage#PoliceProcedures#foryoupageシ#FBI#dashcam#fbi#Georgia"
         post_text = f"{title}\n\n{snippet}\n\n{hashtags}"
         
@@ -90,9 +106,9 @@ def send_to_buffer():
             "metadata": {"facebook": {"type": "post"}}
         }
 
-        # 4. DYNAMIC MEDIA HANDLING (IMAGE OR VIDEO ASSETS)
+        # Dynamic media handling
         assets = []
-        if article.get("urlToVideo"):  # Built-in check if you scale or feed raw video links
+        if article.get("urlToVideo"):
             assets.append({"video": {"url": article.get("urlToVideo")}})
         elif article.get("urlToImage"):
             assets.append({"image": {"url": article.get("urlToImage")}})
@@ -106,8 +122,8 @@ def send_to_buffer():
         response = session.post("https://api.buffer.com", headers=headers, json=payload)
         
         if response.status_code == 200:
-            print(f"[+] Post {index} queued for {due_at}.")
-            posted_count += 1  # Increment only on successful/attempted queue addition
+            print(f"[+] Post {index} sanitized and queued for {due_at}.")
+            posted_count += 1  # Increment only on successful queue addition
         else:
             print(f"[-] Error on post {index}: {response.text}")
         
