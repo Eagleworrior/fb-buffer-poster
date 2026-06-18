@@ -21,7 +21,7 @@ retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503,
 session.mount("https://", HTTPAdapter(max_retries=retries))
 
 def send_to_buffer():
-    # Fetch 10 items as you requested
+    # Fetch 10 items
     url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=10&apiKey={NEWS_API_KEY}"
     try:
         response = session.get(url)
@@ -42,13 +42,29 @@ def send_to_buffer():
     # First post schedules exactly 1 hour after the script runs
     start_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
 
+    # List of sensitive trigger words that cause Meta's API to flag your content
+    META_TRIGGER_WORDS = [
+        "suicide", "died", "death", "killed", "murder", "fatal", 
+        "shooting", "corpse", "stabbing", "homicide", "autopsy"
+    ]
+
+    posted_count = 0  # Tracks successfully processed articles to keep schedule clean
+
     for index, article in enumerate(articles):
         title = article.get("title", "Breaking News")
         snippet = article.get("content") or article.get("description") or ""
+        
+        # 1. CONTENT FILTER CHECK
+        # Combine everything into a lowercase string to check against our blocklist
+        full_text_check = f"{title} {snippet}".lower()
+        if any(word in full_text_check for word in META_TRIGGER_WORDS):
+            print(f"[⏩] Skipping article to protect Page Quality: {title}")
+            continue  # Skips this loop entirely and moves to the next article
+
         post_text = f"{title}\n\n{snippet}\n\nRead more: https://appsupdatess.blogspot.com"
         
-        # Subsequent posts schedule in 1-hour increments
-        scheduled_time = start_time + datetime.timedelta(hours=index)
+        # Subsequent safe posts schedule in clean 1-hour increments using posted_count
+        scheduled_time = start_time + datetime.timedelta(hours=posted_count)
         due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
         input_data = {
@@ -70,10 +86,11 @@ def send_to_buffer():
         
         if response.status_code == 200:
             print(f"[+] Post {index} queued for {due_at}.")
+            posted_count += 1  # Increment only on successful/attempted queue addition
         else:
             print(f"[-] Error on post {index}: {response.text}")
         
-        # Stagger to prevent rate limit (60s delay)
+        # Stagger to prevent rate limit (60s delay) - only applies if we actually hit Buffer
         if index < len(articles) - 1:
             time.sleep(60)
 
