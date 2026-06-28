@@ -22,8 +22,8 @@ retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503,
 session.mount("https://", HTTPAdapter(max_retries=retries))
 
 def send_to_buffer():
-    # Fetch 10 items
-    url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=10&apiKey={NEWS_API_KEY}"
+    # Fetch 5 items instead of 10
+    url = f"https://newsapi.org/v2/top-headlines?language=en&pageSize=5&apiKey={NEWS_API_KEY}"
     try:
         response = session.get(url)
         articles = response.json().get("articles", [])
@@ -85,6 +85,7 @@ def send_to_buffer():
         hashtags = "K #follower#follower#fypシ゚viralシ#operationallessons#dashcamfootage#PoliceProcedures#foryoupageシ#FBI#dashcam#fbi#Georgia"
         post_text = f"{title}\n\n{snippet}...\n\n{hashtags}"
         
+        # Spaces posts exactly 1 hour apart
         scheduled_time = start_time + datetime.timedelta(hours=posted_count)
         due_at = scheduled_time.isoformat(timespec='milliseconds').replace("+00:00", "Z")
 
